@@ -20,11 +20,46 @@ export default function Dashboard() {
   const { alerts, refresh } = useAdherence();
   const [activeTab, setActiveTab] = useState('assistant');
   const [vitals, setVitals] = useState({
-    bp: '120/80',
-    sugar: '110 mg/dL',
-    pulse: '72 bpm',
-    weight: '68 kg'
+    bp: '--/--',
+    sugar: '--',
+    pulse: '-- bpm',
+    weight: '-- kg'
   });
+  const [schedules, setSchedules] = useState([]);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [vitalsData, schedulesData] = await Promise.all([
+          apiFetch('/api/vitals/latest'),
+          apiFetch('/api/schedules')
+        ]);
+        
+        setVitals({
+          bp: vitalsData.bp ? `${vitalsData.bp.value}/${vitalsData.bp.value2 || 80}` : '--/--',
+          sugar: vitalsData.sugar ? `${vitalsData.sugar.value} ${vitalsData.sugar.unit}` : '--',
+          pulse: vitalsData.pulse ? `${vitalsData.pulse.value} bpm` : '-- bpm',
+          weight: vitalsData.weight ? `${vitalsData.weight.value} kg` : '-- kg'
+        });
+        
+        setSchedules(schedulesData || []);
+      } catch (err) {
+        console.error('Failed to load dashboard data', err);
+      }
+    }
+    fetchData();
+  }, [apiFetch]);
+
+  const handleTakeNow = async (id) => {
+    try {
+      await apiFetch(`/api/schedules/${id}/take`, { method: 'PUT' });
+      const updatedSchedules = await apiFetch('/api/schedules');
+      setSchedules(updatedSchedules || []);
+      refresh();
+    } catch (e) {
+      console.error('Failed to mark as taken', e);
+    }
+  };
 
   const stats = [
     { label: 'Blood Pressure', value: vitals.bp, icon: <Heart size={18} color="#ef4444" />, trend: 'Stable' },
@@ -132,21 +167,23 @@ export default function Dashboard() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#1e293b' }}>Today's Timeline</h2>
                 <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8125rem', fontWeight: '700', color: '#64748b' }}>
-                  <CheckCircle2 size={16} color="#10b981" /> 2 Completed
-                  <Clock size={16} color="#3b82f6" /> 1 Remaining
+                  <CheckCircle2 size={16} color="#10b981" /> {schedules.filter(s => s.status === 'taken').length} Completed
+                  <Clock size={16} color="#3b82f6" /> {schedules.filter(s => s.status === 'pending').length} Remaining
                 </div>
               </div>
               
               {/* Timeline implementation */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                {[
-                  { time: '08:00 AM', name: 'Metformin', dosage: '500mg', status: 'missed', icon: 'tablet' },
-                  { time: '09:30 AM', name: 'Amlodipine', dosage: '5mg', status: 'taken', icon: 'capsule' },
-                  { time: '01:00 PM', name: 'Paracetamol', dosage: '650mg', status: 'pending', icon: 'tablet' },
-                ].map((item, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: '1.5rem' }}>
+                {schedules.length === 0 && (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                    <Calendar size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+                    <p>No medicines scheduled for today.</p>
+                  </div>
+                )}
+                {schedules.map((item) => (
+                  <div key={item.id} style={{ display: 'flex', gap: '1.5rem' }}>
                     <div style={{ minWidth: '80px', textAlign: 'right', fontSize: '0.875rem', fontWeight: '700', color: '#64748b', paddingTop: '1rem' }}>
-                      {item.time}
+                      {item.scheduled_time}
                     </div>
                     <div style={{ 
                       flex: 1, 
@@ -169,8 +206,8 @@ export default function Dashboard() {
                           <Clock size={20} />
                         </div>
                         <div>
-                          <h4 style={{ fontSize: '1rem', fontWeight: '700', color: '#1e293b' }}>{item.name}</h4>
-                          <p style={{ fontSize: '0.8125rem', color: '#64748b' }}>{item.dosage} • Before Lunch</p>
+                          <h4 style={{ fontSize: '1rem', fontWeight: '700', color: '#1e293b' }}>{item.medicine_name}</h4>
+                          <p style={{ fontSize: '0.8125rem', color: '#64748b' }}>{item.dosage} • {item.instructions || 'As prescribed'}</p>
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -179,7 +216,13 @@ export default function Dashboard() {
                         ) : item.status === 'missed' ? (
                           <span style={{ fontSize: '0.8125rem', fontWeight: '700', color: '#ef4444' }}>Missed ❌</span>
                         ) : (
-                          <button className="btn btn-sm btn-primary">Take Now <ChevronRight size={14} /></button>
+                          <button 
+                            className="btn btn-sm btn-primary"
+                            onClick={() => handleTakeNow(item.id)}
+                            style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                          >
+                            Take Now <ChevronRight size={14} />
+                          </button>
                         )}
                       </div>
                     </div>
