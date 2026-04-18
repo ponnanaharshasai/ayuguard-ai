@@ -6,7 +6,7 @@ import { LogIn, Play, Shield, Eye, EyeOff, Zap } from 'lucide-react';
 
 export default function Login() {
   const { t } = useTranslation();
-  const { login, loginAsDemo } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('');

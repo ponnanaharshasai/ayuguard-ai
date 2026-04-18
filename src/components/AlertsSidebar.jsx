@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { AlertCircle, Clock, CheckCircle, TrendingUp, Bell, Zap } from 'lucide-react';
 
 export default function AlertsSidebar() {
-  const { alerts, missedCount } = useAdherence();
+  const { alerts, missedCount, adherenceScore } = useAdherence();
   const { user } = useAuth();
 
   return (
@@ -48,7 +48,9 @@ export default function AlertsSidebar() {
           <span style={{ fontWeight: '600' }}>Adherence Score</span>
         </div>
         <div style={{ fontSize: '2.5rem', fontWeight: '800', marginBottom: '0.25rem' }}>
-          {alerts.length === 0 && missedCount === 0 ? '---' : '100%'}
+          {adherenceScore?.adherence_percent !== undefined 
+            ? `${Math.round(adherenceScore.adherence_percent)}%` 
+            : (alerts.length === 0 && missedCount === 0 ? '---' : '100%')}
         </div>
         <p style={{ fontSize: '0.8125rem', opacity: 0.9 }}>
           {alerts.length === 0 ? 'No data yet. Let\'s start tracking!' : 'Excellent consistency!'}
