@@ -891,6 +891,12 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
       [req.user.id, today]
     );
 
+    // Get 3 most recent vitals
+    const recentVitals = await dbAll(
+      'SELECT type, value, value2, unit, recorded_at FROM vitals WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 3',
+      [req.user.id]
+    );
+
     // --- GEMINI INTEGRATION ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -900,7 +906,7 @@ You are the AyuGuard AI Medical Companion for Indian elderly care.
 The user is ${req.user.full_name}, age ${req.user.age || 'unknown'}. They prefer to speak ${language === 'te' ? 'Telugu' : 'English'}.
 
 CURRENT OBSERVATIONS:
-- Vitals: ${JSON.stringify(vitals || {})}
+- Latest Recorded Vitals (from database): ${recentVitals.length > 0 ? JSON.stringify(recentVitals) : 'No recorded vitals'}
 - Adherence Score Today: ${adherence ? adherence.score + '%' : 'No data yet'}
 - Active Medicines: ${medList || 'None'}
 
