@@ -3,6 +3,8 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+require('dotenv').config();
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -867,7 +869,7 @@ app.get('/api/adherence/history', authenticateToken, async (req, res) => {
 // POST /api/ai/chat
 app.post('/api/ai/chat', authenticateToken, async (req, res) => {
   try {
-    const { message, language, vitals } = req.body;
+    const { message, language, vitals, history } = req.body;
     
     // Save user message
     await dbRun(
@@ -875,10 +877,6 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
       [req.user.id, message, language || 'en']
     );
 
-    // Context-aware response simulation
-    let reply = '';
-    const msgLower = message.toLowerCase();
-    
     // Get user's medicines for context
     const medicines = await dbAll(
       'SELECT name, dosage, frequency FROM medicines WHERE user_id = ? AND is_active = 1',
@@ -893,25 +891,45 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
       [req.user.id, today]
     );
 
-    if (language === 'te') {
-      if (msgLower.includes('మందు') || msgLower.includes('medicine')) {
-        reply = `మీ ప్రస్తుత మందులు: ${medList || 'ఇంకా మందులు జోడించబడలేదు'}. మీ వైద్యుడి సూచనల ప్రకారం వేళకు తీసుకోండి.`;
-      } else if (msgLower.includes('ఆరోగ్యం') || msgLower.includes('health')) {
-        reply = `మీ ఆరోగ్య స్థితి: BP ${vitals?.bp || 'అందుబాటులో లేదు'}, Sugar ${vitals?.sugar || 'అందుబాటులో లేదు'}. ప్రస్తుతం అన్ని విలువలు స్థిరంగా ఉన్నాయి.`;
-      } else {
-        reply = `నేను మీ సందేశాన్ని విన్నాను. ${adherence ? `నేడు మీ అనుసరణ స్కోరు ${adherence.score}%.` : 'మీ మందులను వేళకు వేసుకోండి.'} మీకు ఏవైనా సందేహాలుంటే నన్ను అడగండి.`;
-      }
-    } else {
-      if (msgLower.includes('medicine') || msgLower.includes('drug') || msgLower.includes('pill')) {
-        reply = `Your current medications: ${medList || 'No medicines added yet'}. Please take them as prescribed by your doctor.`;
-      } else if (msgLower.includes('adherence') || msgLower.includes('score') || msgLower.includes('how am i')) {
-        reply = adherence ? `Your adherence score today is ${adherence.score}%. You've taken ${adherence.taken_doses} out of ${adherence.total_doses} scheduled doses. ${adherence.score >= 80 ? 'Great job keeping up!' : 'Try to improve by setting reminders.'}` : 'No adherence data yet for today. Your medicines will appear in the schedule once added.';
-      } else if (msgLower.includes('vital') || msgLower.includes('bp') || msgLower.includes('sugar') || msgLower.includes('health')) {
-        reply = `Your latest vitals — BP: ${vitals?.bp || 'not recorded'}, Sugar: ${vitals?.sugar || 'not recorded'}, Pulse: ${vitals?.pulse || 'not recorded'}. ${vitals?.bp ? 'Overall looking stable!' : 'Start recording your vitals to get AI-powered insights.'}`;
-      } else {
-        reply = `I've analyzed your query: "${message}". ${adherence ? `Today's adherence: ${adherence.score}%.` : ''} I'm here to help with medicines, vitals, and health questions. What would you like to know?`;
+    // --- GEMINI INTEGRATION ---
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const contextPrompt = `
+You are the AyuGuard AI Medical Companion for Indian elderly care.
+The user is ${req.user.full_name}, age ${req.user.age || 'unknown'}. They prefer to speak ${language === 'te' ? 'Telugu' : 'English'}.
+
+CURRENT OBSERVATIONS:
+- Vitals: ${JSON.stringify(vitals || {})}
+- Adherence Score Today: ${adherence ? adherence.score + '%' : 'No data yet'}
+- Active Medicines: ${medList || 'None'}
+
+RULES:
+1. Respond directly to the user's message.
+2. If medical advice is discussed, prominently state a disclaimer (e.g., "> ⚠️ Always consult your doctor").
+3. Use clear Markdown (bold headers, short bullet points).
+4. Be empathetic, kind, and concise. Avoid hallucinating medical facts.
+5. You MUST respond entirely in ${language === 'te' ? 'Telugu language' : 'English language'}.
+    `;
+
+    // Construct history for Gemini
+    const chatHistory = [
+      { role: "user", parts: [{ text: contextPrompt }] },
+      { role: "model", parts: [{ text: `Understood. I will respond to the user exclusively in ${language === 'te' ? 'Telugu' : 'English'}.` }] }
+    ];
+
+    if (history && history.length > 0) {
+      for (const msg of history) {
+        chatHistory.push({
+          role: msg.role === 'user' ? 'user' : 'model',
+          parts: [{ text: msg.content }]
+        });
       }
     }
+
+    const chat = model.startChat({ history: chatHistory });
+    const result = await chat.sendMessage(message);
+    const reply = result.response.text();
 
     // Save AI response
     await dbRun(
